@@ -1,0 +1,152 @@
+---
+title: "Excercises classification prediction"
+author: "Edgar Jurado"
+date: "Thursday, July 14, 2016"
+output: html_document
+---
+
+
+####Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+####Getting and loading the data:
+
+```{r, echo=FALSE}
+library(caret)
+library(rattle)
+```
+
+First, we download the data from the given sources. Then, we load the files downloaded:
+
+```{r}
+if(!file.exists("training.csv")){
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "training.csv",cacheOK=TRUE)
+}
+if(!file.exists("testing.csv")){
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+                "testing.csv",cacheOK=TRUE)
+}
+allData<-read.csv(file = "training.csv")
+testingCases<-read.csv(file = "testing.csv")
+
+```
+
+####Cleanning the data
+
+First, we see the dimension of data.
+
+```{r}
+dim(allData)
+```
+
+As we can see, there are too many features in the dataset. Some of the features are empty or have near zero variance (see appendix). We will discard the near zero variance features.
+
+```{r}
+nzv <- nearZeroVar(allData, saveMetrics = TRUE)
+namesLength<-dim(allData[,!nzv$nzv])[2]
+recordsLength<-dim(allData[,!nzv$nzv])[1]
+columns<-c()
+
+```
+
+After that, we are going to discard the NA values in the rest of the features (we discard the first 7 values as they are not needed for prediction, see appendix).
+
+```{r}
+for(i in 7:namesLength){
+  notNas<-which(!is.na(allData[,!nzv$nzv][i]))
+  if ((length(notNas)/recordsLength)>0.5){
+    columns<-c(columns,i)
+  }
+}
+```
+
+####Partitioning data
+
+When we have discarded this values, we have a dataset of reduced data. Then we proceed to make the testing and training sets
+```{r}
+set.seed(872016)
+inTrain<-createDataPartition(allData$classe,p=0.8)[[1]]
+rdcData<-allData[,!nzv$nzv][,columns]
+
+training<-rdcData[inTrain,]
+testing<-rdcData[-inTrain,]
+
+```
+
+####Creating the prediction models
+
+We generate the training sets with the methods Random Forest, Nearest neighborn and Gradient bosting. We discarded other methods because of low accuracy obtained.
+
+```{r}
+
+if (file.exists("modelRF.rda")){
+  load(file="modelRF.rda")
+}else{
+  modelRF<-train(classe~.,method="rf",data=training)
+  save(modelRF,file="modelRF.rda")
+}
+if (file.exists("modelGBM.rda")){
+  load(file="modelGBM.rda")
+}else{
+  modelGBM<-train(classe~.,method="gbm",data=training,
+                preProcess = c("center", "scale", "BoxCox", "pca"))  
+  save(modelGam,file="modelGBM.rda")
+}
+
+if (file.exists("modelKnn.rda")){
+  load(file="modelKnn.rda")
+}else{
+  modelKnn<-train(classe~.,method="knn",data=training,
+                preProcess = c("center", "scale", "BoxCox", "pca"))
+  save(modelKnn,file="modelKnn.rda")
+}
+
+```
+
+We generate the prediction models for these training sets, and get the accuracy of each one with the testing set:
+
+```{r}
+pRF<-predict(modelRF,newdata=testing)
+pKnn<-predict(modelKnn,newdata=testing)
+pGBM<-predict(modelGBM,newdata=testing)
+
+confusionMatrix(pKnn,testing$classe)$overall[1]
+confusionMatrix(pRF,testing$classe)$overall[1]
+confusionMatrix(pGBM,testing$classe)$overall[1]
+```
+
+We get 3 models with an accuracy of more than 90%, and the random forest has an accuracy of 0.9966862, which is really good.
+
+####Prediction for testing cases:
+
+We use all the models we created to make the predictions. As long as the 3 models have more that 90% accuracy, we will make an approach with a "voting" method. If there are 2 models with one result and another with a different one, we will take the first prediction. In the case the three differ, we would take the Random Forest prediction as it has better accuracy:
+```{r}
+predict(modelRF,testingCases[,-160])
+predict(modelGBM,testingCases[,-160])
+predict(modelKnn,testingCases[,-160])
+
+```
+
+####Conclusion
+
+With the preceeding results, the results for the prediction is:
+B A B A A E D D A A B C B A E E A B B B
+As long as the only difference is in position 8, where the Random Forest predicted "D" and the other 2 predicted B. As we have 2 predictions for B in that position, we take that one for the testing cases.
+
+
+###Appendix
+
+By exploring the dataset, we can see the following data
+```{r}
+head(allData)
+
+```
+We see that there are a lot of NA values and empty values, so we have to discard these features.
+
+Also, we can see that the first 7 values are not needed for prediction. We comment on why we discard these features:
+X is only the sequence of values
+user_name doesn't give us any value for what we are looking for
+raw_timestamp_part_1 raw_timestamp_part_2   cvtd_timestamp. These values are only dates, they doesn't give us any value
+new_window and num_window are only to know if it was the same routine or another, so, we don't get any value from this data.
+
+
